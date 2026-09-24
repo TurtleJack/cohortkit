@@ -39,16 +39,18 @@ export const cohortSchema = z.object({
   championLimit: z.number().int().min(1).max(20), reviewMode: z.enum(['assigned','pool']), blindReview: z.boolean(),
 });
 export type CohortConfig = z.infer<typeof cohortSchema>;
-export interface Cohort extends CohortConfig { id: string; orgId: string; slug: string; version: number; createdAt: string; applicationCount?: number }
+export interface Cohort extends CohortConfig { id: string; orgId: string; slug: string; version: number; createdAt: string; applicationCount?: number; summary?: SummaryDraft|null }
 export interface Organization { id: string; name: string; slug: string; plan: Plan; subscriptionStatus: 'trialing'|'active'|'past_due'|'canceled'; trialEndsAt: string; modules: Module[]; role: Role; branding: Branding; stripeCustomerId?: string; createdAt: string }
 export interface User { id: string; email: string; name: string; platformAdmin: boolean }
+export interface FeedbackDraft { text: string; source: 'local'|'openai'; model: string; generatedAt: string; approvedAt: string|null }
+export interface SummaryDraft { text: string; source: 'local'|'openai'; model: string; generatedAt: string; approvedAt: string|null }
 export interface Brief { source: 'local'|'openai'; summary: string; strengths: string[]; concerns: string[]; questions: string[]; evidence: { field: string; quote: string }[]; generatedAt: string; model: string; approvedAt: string|null; approvedBy: string|null }
 export interface Review { id: string; appId: string; reviewerId: string; reviewerName: string; stageId: string; scores: Record<string,number>; recommendation: Recommendation; champion: boolean; notes: string; overall: number; version: number; createdAt: string }
 export interface ApplicantData { startupName: string; founderName: string; email: string; industry: string; location: string; companyStage: string; answers: Record<string,string>; qualifications: Record<string,boolean>; consent: boolean }
 export const applicantSchema = z.object({ startupName: text(150), founderName: text(120), email: z.email().max(250).transform(s => s.toLowerCase()), industry: text(100), location: text(120), companyStage: z.enum(['Idea','Prototype','MVP','Revenue','Growth']), answers: z.record(identifier,z.string().trim().max(10000)), qualifications: z.record(identifier,z.boolean()), consent: z.literal(true) });
 export interface Application extends ApplicantData {
   id: string; orgId: string; cohortId: string; stageId: string; status: 'draft'|'submitted'; pool: typeof pools[number];
-  scrubbedAt: string|null; scrubNotes: string; brief: Brief|null; outcome: Outcome|null; decisionNotes: string; feedback: string|null;
+  scrubbedAt: string|null; scrubNotes: string; brief: Brief|null; outcome: Outcome|null; decisionNotes: string; feedback: FeedbackDraft|null;
   interview: { status: 'none'|'ready'|'invited'|'scheduled'|'completed'|'no_show'|'canceled'; scheduledAt: string; notes: string };
   createdAt: string; submittedAt: string|null; version: number; reviews: Review[]; assignedReviewerIds: string[]; recusedReviewerIds: string[];
 }

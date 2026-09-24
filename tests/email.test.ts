@@ -5,6 +5,7 @@ import { Store } from '../server/db';
 import { createApi } from '../server/api';
 import { defaultCohort } from '../shared/domain';
 import { enqueue, flushOutbox, queueDeadlineReminders, type EmailAdapter, type EmailMessage } from '../server/email';
+import { OpenAiProvider } from '../server/ai';
 
 const origin = 'http://localhost:3100';
 
@@ -55,7 +56,7 @@ describe('email triggers through the API', () => {
 
   beforeAll(() => {
     store = new Store(':memory:');
-    app = createApi(store, { origin, demo: false, secure: false, email: new CapturingAdapter() });
+    app = createApi(store, { origin, demo: false, secure: false, email: new CapturingAdapter(), aiProvider: new OpenAiProvider('') });
   });
 
   it('queues invitation, draft, receipt, and decision emails', async () => {
@@ -92,7 +93,7 @@ describe('email triggers through the API', () => {
 
   it('queues deadline reminders for cohorts closing soon', async () => {
     const store = new Store(':memory:');
-    const app2 = createApi(store, { origin, demo: false, secure: false, email: new CapturingAdapter() });
+    const app2 = createApi(store, { origin, demo: false, secure: false, email: new CapturingAdapter(), aiProvider: new OpenAiProvider('') });
     const admin = request.agent(app2);
     await admin.post('/api/auth/register').set('Origin', origin).send({ name: 'Alex Morgan', email: 'alex@example.test', password: 'correct-horse-battery', organizationName: 'Cascadia Ventures', slug: 'cascadia' });
     const orgId = (await admin.get('/api/session')).body.organizations[0].id;

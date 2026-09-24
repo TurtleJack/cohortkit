@@ -8,10 +8,11 @@ import { Store, id, now } from './db';
 import { Repository, type OrgRow, type AppRow } from './repository';
 import { assert, HttpError, hashPassword, verifyPassword, token, digest, cookie, issueSession, sessionUser } from './auth';
 import { demoUsers } from './seed';
-import { localBrief, generateBrief } from './analysis';
+import { localBrief } from './analysis';
+import { aiBrief, localProposal, proposeProgramConfig, localFeedback, aiFeedback, localSummary, aiSummary, type AiProvider } from './ai';
 import { enqueue, invitationMessage, draftLinkMessage, receiptMessage, decisionMessage, type EmailAdapter, type EmailRow } from './email';
 
-export interface Config { origin: string; demo: boolean; secure: boolean; email: EmailAdapter; aiKey?:string; aiModel?:string; stripeKey?:string; stripeWebhookSecret?:string; stripePrices?:Partial<Record<'starter'|'growth',string>> }
+export interface Config { origin: string; demo: boolean; secure: boolean; email: EmailAdapter; aiProvider: AiProvider; stripeKey?:string; stripeWebhookSecret?:string; stripePrices?:Partial<Record<'starter'|'growth',string>> }
 type Authed = Request & { user:User; organization:Organization };
 const str=(req:Request,key:string)=>String(req.params[key]);
 const emailSchema=z.email().max(250).transform(x=>x.toLowerCase());
@@ -130,7 +131,7 @@ export function createApi(store:Store,config:Config) {
     const members=store.all<{id:string;name:string;email:string;role:Role}>('SELECT u.id,u.name,u.email,m.role FROM memberships m JOIN users u ON m.user_id=u.id WHERE m.org_id=?',org.id).filter(m=>canDecide(org.role)||m.id===user.id).map(m=>({...m,email:manager?m.email:'',assignments:repo.count('SELECT count(*) n FROM assignments x JOIN applications a ON a.id=x.app_id WHERE x.org_id=? AND x.reviewer_id=? AND x.recused=0 AND x.stage_id=a.stage_id AND a.outcome IS NULL',org.id,m.id),completed:repo.count('SELECT count(*) n FROM reviews WHERE org_id=? AND reviewer_id=?',org.id,m.id)}));
     const invitations=manager?store.all<{id:string;email:string;name:string;role:string;cohort_id:string|null;expires_at:string;accepted_at:string|null;created_at:string}>('SELECT * FROM invitations WHERE org_id=? ORDER BY created_at DESC LIMIT 100',org.id).map(i=>({id:i.id,email:i.email,name:i.name,role:i.role,cohortId:i.cohort_id,expiresAt:i.expires_at,acceptedAt:i.accepted_at,createdAt:i.created_at})):[];
     const audits=canDecide(org.role)?store.all<{id:string;actor:string;action:string;target_id:string;detail:string;created_at:string}>('SELECT a.id,COALESCE(u.name,a.actor) actor,a.action,a.target_id,a.detail,a.created_at FROM audit_events a LEFT JOIN users u ON u.id=a.actor WHERE a.org_id=? ORDER BY a.created_at DESC LIMIT 100',org.id).map(a=>({id:a.id,actor:a.actor,action:a.action,targetId:a.target_id,detail:a.detail,createdAt:a.created_at})):[];
-    res.json({organization:org,cohorts:repo.cohorts(org.id),members,invitations,audits,usage:{applications:repo.count('SELECT count(*) n FROM applications WHERE org_id=?',org.id),reviewers:repo.count("SELECT count(*) n FROM memberships WHERE org_id=? AND role<>'owner'",org.id),cohorts:repo.cohorts(org.id).length},integrations:{ai:!!config.aiKey&&!config.demo,billing:!!stripe}});
+    res.json({organization:org,cohorts:repo.cohorts(org.id),members,invitations,audits,usage:{applications:repo.count('SELECT count(*) n FROM applications WHERE org_id=?',org.id),reviewers:repo.count("SELECT count(*) n FROM memberships WHERE org_id=? AND role<>'owner'",org.id),cohorts:repo.cohorts(org.id).length},integrations:{ai:config.aiProvider.available&&!config.demo,billing:!!stripe}});
   });
   app.patch('/api/orgs/:orgId/settings',(req,res)=>{const {user,org}=manage(req);const data=z.object({name:z.string().trim().min(2).max(120),modules:z.array(z.enum(modules)).min(1).refine(x=>new Set(x).size===x.length),branding:brandingSchema}).parse(req.body);store.transaction(()=>{store.run('UPDATE organizations SET name=?,modules=?,branding=? WHERE id=?',data.name,JSON.stringify(data.modules),JSON.stringify(data.branding),org.id);store.audit(org.id,user.id,'organization.settings_updated',org.id);});res.json({ok:true});});
   app.post('/api/orgs/:orgId/cohorts',(req,res)=>{const {user,org}=manage(req);repo.active(org);const data=cohortSchema.parse(req.body);const cohort=store.transaction(()=>repo.createCohort(org,data,user.id));res.status(201).json(cohort);});
@@ -178,11 +179,70 @@ export function createApi(store:Store,config:Config) {
   app.post('/api/orgs/:orgId/applications/:appId/scrub',(req,res)=>{const {user,org}=manage(req);repo.active(org,'intake');const {application:a,cohort}=appContext(req);const {notes,version}=z.object({notes:z.string().trim().min(1,'Record your eligibility check').max(4000),version:versionSchema}).parse(req.body);assert(a.status==='submitted'&&!a.outcome,409,'Only submitted, undecided applications can be scrubbed');assert(a.version===version,409,'Application changed. Reload before continuing.');const issues=submissionIssues(a,cohort);assert(!issues.length,400,issues.join('. '));store.transaction(()=>{store.run('UPDATE applications SET scrubbed_at=?,scrub_notes=?,version=version+1 WHERE org_id=? AND id=?',now(),notes,org.id,a.id);store.audit(org.id,user.id,'application.scrubbed',a.id,notes);});res.json({ok:true});});
   const aiInFlight=new Set<string>();
   app.post('/api/orgs/:orgId/applications/:appId/brief',async(req,res)=>{
-    const {user,org}=manage(req);repo.active(org,'ai');const {application:a,cohort}=appContext(req);const {source}=z.object({source:z.enum(['local','openai'])}).parse(req.body);assert(a.scrubbedAt&&!a.outcome,409,'Scrub this application before generating its brief');assert(!aiInFlight.has(a.id),409,'A brief is already being generated');assert(source==='local'||config.aiKey&&!config.demo,503,'Live AI is not configured for this workspace');
+    const {user,org}=manage(req);repo.active(org,'ai');const {application:a,cohort}=appContext(req);const {source}=z.object({source:z.enum(['local','openai'])}).parse(req.body);assert(a.scrubbedAt&&!a.outcome,409,'Scrub this application before generating its brief');assert(!aiInFlight.has(a.id),409,'A brief is already being generated');assert(source==='local'||config.aiProvider.available&&!config.demo,503,'Live AI is not configured for this workspace');
     aiInFlight.add(a.id);
-    try { const brief=source==='local'?localBrief(a,cohort):await generateBrief(a,cohort,config.aiKey!,config.aiModel||'gpt-4.1-mini');store.transaction(()=>{const latest=repo.app(org.id,a.id);assert(latest.version===a.version,409,'Application changed during generation. Please try again.');repo.setBrief(a,brief);store.audit(org.id,user.id,'brief.generated',a.id,source);});res.json({ok:true}); } finally {aiInFlight.delete(a.id);}
+    try { const brief=source==='local'?localBrief(a,cohort):await aiBrief(a,cohort,config.aiProvider);store.transaction(()=>{const latest=repo.app(org.id,a.id);assert(latest.version===a.version,409,'Application changed during generation. Please try again.');repo.setBrief(a,brief);store.audit(org.id,user.id,'brief.generated',a.id,source);});res.json({ok:true}); } finally {aiInFlight.delete(a.id);}
   });
   app.post('/api/orgs/:orgId/applications/:appId/brief/approve',(req,res)=>{const {user,org}=manage(req);repo.active(org,'ai');const {application:a}=appContext(req);const {version}=z.object({version:versionSchema}).parse(req.body);assert(a.version===version,409,'Application changed. Reload before approval.');assert(a.brief,409,'Generate a brief first');store.transaction(()=>{repo.setBrief(a,{...a.brief!,approvedAt:now(),approvedBy:user.id});store.audit(org.id,user.id,'brief.approved',a.id);});res.json({ok:true});});
+
+  // --- AI-assisted setup, feedback, and summaries ---
+  const proposeInFlight=new Set<string>();
+  app.post('/api/orgs/:orgId/cohorts/propose',async(req,res)=>{
+    const {user,org}=manage(req);repo.active(org,'ai');
+    const {description}=z.object({description:z.string().trim().min(20).max(4000)}).parse(req.body);
+    assert(!proposeInFlight.has(org.id),409,'A proposal is already being generated');
+    proposeInFlight.add(org.id);
+    try {
+      const useLive=config.aiProvider.available&&!config.demo;
+      const proposal=useLive?await proposeProgramConfig(description,config.aiProvider):localProposal(description);
+      store.audit(org.id,user.id,'ai.proposal_generated',org.id,useLive?'openai':'local');
+      res.json({source:useLive?'openai':'local',proposal});
+    } finally { proposeInFlight.delete(org.id); }
+  });
+  const feedbackInFlight=new Set<string>();
+  app.post('/api/orgs/:orgId/applications/:appId/feedback',async(req,res)=>{
+    const {user,org}=manage(req);repo.active(org,'ai');const {application:a,cohort}=appContext(req);
+    const {version}=z.object({version:versionSchema}).parse(req.body);
+    assert(a.version===version,409,'Application changed. Reload before generating.');
+    assert(a.outcome==='rejected'||a.outcome==='waitlist',409,'Feedback drafts are for declined or waitlisted applications');
+    assert(!feedbackInFlight.has(a.id),409,'Feedback is already being generated');
+    feedbackInFlight.add(a.id);
+    try {
+      const useLive=config.aiProvider.available&&!config.demo;
+      const draft=useLive?await aiFeedback(a,cohort,a.outcome,config.aiProvider):localFeedback(a,a.outcome);
+      store.transaction(()=>{const latest=repo.app(org.id,a.id);assert(latest.version===a.version,409,'Application changed during generation. Please try again.');store.run('UPDATE applications SET feedback=?,version=version+1 WHERE org_id=? AND id=?',JSON.stringify(draft),org.id,a.id);store.audit(org.id,user.id,'feedback.generated',a.id,draft.source);});
+      res.json({ok:true});
+    } finally { feedbackInFlight.delete(a.id); }
+  });
+  app.post('/api/orgs/:orgId/applications/:appId/feedback/approve',(req,res)=>{
+    const {user,org}=manage(req);repo.active(org,'ai');const {application:a}=appContext(req);
+    const {version}=z.object({version:versionSchema}).parse(req.body);
+    assert(a.version===version,409,'Application changed. Reload before approving.');
+    assert(a.feedback&&!a.feedback.approvedAt,409,'Generate a feedback draft first');
+    store.transaction(()=>{store.run('UPDATE applications SET feedback=? WHERE org_id=? AND id=?',JSON.stringify({...a.feedback,approvedAt:now()}),org.id,a.id);store.audit(org.id,user.id,'feedback.approved',a.id);});
+    res.json({ok:true});
+  });
+  const summaryInFlight=new Set<string>();
+  app.post('/api/orgs/:orgId/cohorts/:cohortId/summary',async(req,res)=>{
+    const {user,org}=decide(req);repo.active(org,'ai');const cohort=repo.cohort(org.id,str(req,'cohortId'));
+    assert(!summaryInFlight.has(cohort.id),409,'A summary is already being generated');
+    const apps=store.all<AppRow>("SELECT * FROM applications WHERE org_id=? AND cohort_id=? AND status='submitted'",org.id,cohort.id).map(r=>repo.appDto(r));
+    summaryInFlight.add(cohort.id);
+    try {
+      const useLive=config.aiProvider.available&&!config.demo;
+      const draft=useLive?await aiSummary(cohort,apps,config.aiProvider):localSummary(cohort,apps);
+      store.run('UPDATE cohorts SET summary=? WHERE org_id=? AND id=?',JSON.stringify(draft),org.id,cohort.id);
+      store.audit(org.id,user.id,'ai.summary_generated',cohort.id,draft.source);
+      res.json({ok:true});
+    } finally { summaryInFlight.delete(cohort.id); }
+  });
+  app.post('/api/orgs/:orgId/cohorts/:cohortId/summary/approve',(req,res)=>{
+    const {user,org}=decide(req);repo.active(org,'ai');const cohort=repo.cohort(org.id,str(req,'cohortId'));
+    assert(cohort.summary&&!cohort.summary.approvedAt,409,'Generate a summary first');
+    store.run('UPDATE cohorts SET summary=? WHERE org_id=? AND id=?',JSON.stringify({...cohort.summary,approvedAt:now()}),org.id,cohort.id);
+    store.audit(org.id,user.id,'ai.summary_approved',cohort.id);
+    res.json({ok:true});
+  });
   app.post('/api/orgs/:orgId/applications/:appId/pool',(req,res)=>{const {user,org}=manage(req);repo.active(org,'review');const {application:a}=appContext(req);const {pool,version}=z.object({pool:z.enum(pools),version:versionSchema}).parse(req.body);assert(a.version===version,409,'Application changed. Reload before continuing.');assert(a.scrubbedAt&&!a.outcome,409,'Scrub this application before placing it in a pool');store.transaction(()=>{store.run('UPDATE applications SET pool=?,version=version+1 WHERE org_id=? AND id=?',pool,org.id,a.id);store.audit(org.id,user.id,'application.pool_changed',a.id,pool);});res.json({ok:true});});
 
   app.put('/api/orgs/:orgId/applications/:appId/review',(req,res)=>{
@@ -209,7 +269,7 @@ export function createApi(store:Store,config:Config) {
   app.post('/api/orgs/:orgId/applications/:appId/interview',(req,res)=>{const {user,org}=decide(req);repo.active(org,'review');const {application:a}=appContext(req);const {version,...interview}=z.object({status:z.enum(['none','ready','invited','scheduled','completed','no_show','canceled']),scheduledAt:z.string().max(50),notes:z.string().trim().max(8000),version:versionSchema}).parse(req.body);assert(a.version===version&&!a.outcome,409,'Application changed or has a final decision');if(interview.status==='scheduled')assert(z.iso.datetime().safeParse(interview.scheduledAt).success,400,'Choose a valid interview date and time');store.transaction(()=>{store.run('UPDATE applications SET interview=?,version=version+1 WHERE org_id=? AND id=?',JSON.stringify(interview),org.id,a.id);store.audit(org.id,user.id,'interview.updated',a.id,interview.status);});res.json({ok:true});});
   app.post('/api/orgs/:orgId/applications/:appId/decision',(req,res)=>{const {user,org}=decide(req);repo.active(org,'review');const {application:a,cohort}=appContext(req);const data=z.object({outcome:z.enum(outcomes),notes:z.string().trim().min(3).max(8000),version:versionSchema,override:z.boolean().default(false)}).parse(req.body);assert(a.version===data.version&&!a.outcome,409,'Application changed or already has a decision');assert(a.status==='submitted',409,'Drafts cannot receive a decision');if(a.stageId!==cohort.stages.at(-1)!.id||!a.scrubbedAt)assert(data.override&&canManage(org.role),409,'Move to final selection first, or record an administrator override');store.transaction(()=>{if(data.outcome==='accepted'){const n=repo.count("SELECT count(*) n FROM applications WHERE org_id=? AND cohort_id=? AND outcome='accepted'",org.id,cohort.id);assert(n<cohort.capacity,409,'Cohort is full. Increase capacity or waitlist this application.');}store.run('UPDATE applications SET outcome=?,decision_notes=?,version=version+1 WHERE org_id=? AND id=?',data.outcome,data.notes,org.id,a.id);store.audit(org.id,user.id,'decision.recorded',a.id,`${data.outcome}${data.override?' (override)':''}: ${data.notes}`);});
   const latest=repo.app(org.id,a.id);
-  enqueue(store,org.id,{to:latest.email,...decisionMessage(org.name,cohort.name,latest.startupName,data.outcome,data.notes,latest.feedback||'')},`decision:${a.id}`);
+  enqueue(store,org.id,{to:latest.email,...decisionMessage(org.name,cohort.name,latest.startupName,data.outcome,data.notes,latest.feedback?.approvedAt?latest.feedback.text:'')},`decision:${a.id}`);
   res.json({ok:true});});
   app.post('/api/orgs/:orgId/applications/:appId/reopen',(req,res)=>{const {user,org}=manage(req);repo.active(org,'review');const {application:a}=appContext(req);const data=z.object({reason:z.string().trim().min(3).max(3000),version:versionSchema}).parse(req.body);assert(a.version===data.version&&a.outcome,409,'Application changed or has no final decision');store.transaction(()=>{store.run('UPDATE applications SET outcome=NULL,decision_notes=?,version=version+1 WHERE org_id=? AND id=?',`Reopened: ${data.reason}`,org.id,a.id);store.audit(org.id,user.id,'decision.reopened',a.id,data.reason);});res.json({ok:true});});
   app.get('/api/orgs/:orgId/cohorts/:cohortId/export',(req,res)=>{const {org}=decide(req);const c=repo.cohort(org.id,str(req,'cohortId'));const rows=store.all<AppRow>("SELECT * FROM applications WHERE org_id=? AND cohort_id=? AND status='submitted'",org.id,c.id).map(r=>repo.appDto(r));const cell=(x:unknown)=>`"${String(x??'').replace(/^[=+\-@\t\r]/,"'$&").replace(/"/g,'""')}"`;const csv=[['Startup','Founder','Email','Industry','Stage','Pool','Reviews','Score','Champions','Final decision'],...rows.map(a=>{const rs=currentReviews(a);return[a.startupName,a.founderName,a.email,a.industry,a.stageId,a.pool,rs.length,rs.length?(rs.reduce((n,r)=>n+r.overall,0)/rs.length).toFixed(2):'',rs.filter(r=>r.champion).length,a.outcome||''];})].map(r=>r.map(cell).join(',')).join('\r\n');res.set('Content-Disposition',`attachment; filename="${c.slug}-applications.csv"`).type('text/csv').send(csv);});

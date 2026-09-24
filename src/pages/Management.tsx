@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { Users, Plus, Trash2, SlidersHorizontal, Shield, Settings, ArrowUpRight, Check, CreditCard, FileText, Star, Layers, X, CalendarDays, ListChecks, Scale, HelpCircle, Mail } from 'lucide-react';
+import { Users, Plus, Trash2, SlidersHorizontal, Shield, Settings, ArrowUpRight, Check, CreditCard, FileText, Star, Layers, X, CalendarDays, ListChecks, Scale, HelpCircle, Mail, Sparkles } from 'lucide-react';
 import { useEffect } from 'react';
 import { useWorkspace, useSession } from '../App';
 import { Avatar, Badge, Button, Empty, PageHeading, SectionTitle, Field, Modal, LinkBox, CheckField, ErrorMessage } from '../ui';
@@ -89,10 +89,22 @@ export function SettingsPage() {
 }
 
 export function CohortEditor() {
-  const { workspace, cohort, base, act, busy, selectCohort } = useWorkspace();
+  const { workspace, cohort, base, act, busy, selectCohort, notify } = useWorkspace();
   const isNew = !cohort;
   const [config, setConfig] = useState<CohortConfig>(() => ({ ...(cohort ? structuredClone(cohort) : defaultCohort()) }));
   const [tab, setTab] = useState<'general' | 'questions' | 'qualifications' | 'rubric' | 'stages' | 'faqs'>('general');
+  const [wizard, setWizard] = useState(false);
+  const [wizDesc, setWizDesc] = useState('');
+  const [wizBusy, setWizBusy] = useState(false);
+  const [wizResult, setWizResult] = useState<{ source: string; proposal: CohortConfig } | null>(null);
+  const [wizError, setWizError] = useState('');
+  const generate = async () => {
+    setWizBusy(true); setWizError('');
+    try {
+      const r = await api<{ source: string; proposal: CohortConfig }>(`${base}/cohorts/propose`, { description: wizDesc });
+      setWizResult(r);
+    } catch (e) { setWizError((e as Error).message); } finally { setWizBusy(false); }
+  };
   if (!canManage(workspace.organization.role)) return <Navigate to="../review" replace />;
   const locked = !isNew && cohort!.applicationCount !== undefined && cohort!.applicationCount > 0;
   const bump = (list: { id: string }[], prefix: string) => `${prefix}${list.reduce((m, x) => { const n = Number(x.id.match(/\d+$/)?.[0]); return Number.isFinite(n) ? Math.max(m, n + 1) : m; }, 1)}`;
@@ -107,8 +119,31 @@ export function CohortEditor() {
     { id: 'general', label: 'General', icon: SlidersHorizontal }, { id: 'questions', label: 'Application questions', icon: FileText }, { id: 'qualifications', label: 'Qualifications', icon: ListChecks }, { id: 'rubric', label: 'Scoring rubric', icon: Star }, { id: 'stages', label: 'Workflow stages', icon: Layers }, { id: 'faqs', label: 'Portal FAQs', icon: HelpCircle },
   ];
   return <>
-    <PageHeading eyebrow="COHORT SETUP" title={isNew ? 'Build your first cohort' : config.name || 'Cohort setup'} description="Everything about how you evaluate founders is configurable here — questions, checks, scoring, and stages." actions={<Button busy={busy} onClick={save}>{isNew ? 'Create cohort' : 'Save changes'} <Check size={16} /></Button>} />
+    <PageHeading eyebrow="COHORT SETUP" title={isNew ? 'Build your first cohort' : config.name || 'Cohort setup'} description="Everything about how you evaluate founders is configurable here — questions, checks, scoring, and stages." actions={<><Button variant="secondary" onClick={() => { setWizResult(null); setWizDesc(''); setWizard(true); }}><Sparkles size={15} /> Generate with AI</Button><Button busy={busy} onClick={save}>{isNew ? 'Create cohort' : 'Save changes'} <Check size={16} /></Button></>} />
     {isNew && <div className="notice">Start with sensible defaults and shape them to your program. Intake questions and the rubric lock once applications exist, so scores stay comparable.</div>}
+    {wizard && <Modal wide title="AI setup assistant" subtitle="Describe your program; AI proposes a complete evaluation setup for you to review and edit." onClose={() => setWizard(false)}>
+      <div className="setup-wizard">
+        {!wizResult ? <>
+          <Field label="Describe your program" hint="Mention the focus, stage, industries, and what you look for in founders."><textarea rows={4} value={wizDesc} onChange={e => setWizDesc(e.target.value)} placeholder="We run a 12-week climate tech accelerator for pre-seed founders building AI solutions for sustainability…" /></Field>
+          {wizError && <div className="notice">{wizError}</div>}
+          <div className="form-actions"><Button variant="secondary" onClick={() => setWizard(false)}>Cancel</Button><Button busy={wizBusy} disabled={wizDesc.trim().length < 20} onClick={() => void generate()}><Sparkles size={15} /> Propose setup</Button></div>
+          <p className="help-text">Without a configured AI provider this uses a local, keyword-driven proposal generator. With OpenAI configured, the proposal is drafted by the model — either way, you review and edit everything before saving.</p>
+        </> : <div className="wizard-preview">
+          <div className="inline"><Badge value={wizResult.source} /><h3 style={{ flex: 1 }}>Proposed setup</h3><Button variant="primary" onClick={() => { setConfig({ ...wizResult.proposal, status: config.status }); setWizard(false); notify('Proposal applied. Review each section and save.'); }}>Use this proposal <Check size={15} /></Button></div>
+          <div className="between" style={{ margin: '14px 0 4px' }}><strong>{wizResult.proposal.name || 'Untitled cohort'}</strong><small className="muted">{wizResult.proposal.rubric.reduce((s, c) => s + c.weight, 0)} total weight</small></div>
+          <p className="muted">{wizResult.proposal.description}</p>
+          <h4>SCORING RUBRIC</h4>
+          <div className="builder-item">{wizResult.proposal.rubric.map(c => <div className="between" key={c.id} style={{ padding: '7px 0' }}><strong>{c.label}</strong><Badge value={`${c.weight}%`} /></div>)}</div>
+          <h4>INTAKE ({wizResult.proposal.questions.length} QUESTIONS · {wizResult.proposal.qualifications.length} CHECKS)</h4>
+          <div className="builder-item">{wizResult.proposal.questions.map(q => <p key={q.id} className="muted" style={{ padding: '4px 0' }}>· {q.label}{q.required ? ' *' : ''}</p>)}</div>
+          <h4>STAGES</h4>
+          <div className="builder-item">{wizResult.proposal.stages.map((s, i) => <p key={s.id} className="muted" style={{ padding: '4px 0' }}>{i + 1}. {s.label} ({s.minReviews} reviews)</p>)}</div>
+          <h4>FAQ ({wizResult.proposal.faqs.length})</h4>
+          <div className="builder-item">{wizResult.proposal.faqs.map(f => <p key={f.question} className="muted" style={{ padding: '4px 0' }}>· {f.question}</p>)}</div>
+          <div className="form-actions"><Button variant="secondary" onClick={() => setWizResult(null)}>Describe differently</Button><Button variant="secondary" onClick={() => setWizard(false)}>Keep current setup</Button><Button onClick={() => { setConfig({ ...wizResult.proposal, status: config.status }); setWizard(false); notify('Proposal applied. Review each section and save.'); }}>Use this proposal <Check size={15} /></Button></div>
+        </div>}
+      </div>
+    </Modal>}
     <div className="setup-layout">
       <nav className="setup-nav" aria-label="Cohort sections">{sections.map(s => <button key={s.id} className={tab === s.id ? 'active' : ''} onClick={() => setTab(s.id)}><s.icon size={16} />{s.label}<ArrowUpRight size={14} /></button>)}
         <div className="setup-tip"><Scale size={22} /><strong>Comparable scores</strong><p>Once a draft exists, questions, qualifications, the rubric, and stages are locked for that cohort. Create a new cohort to change them.</p></div>

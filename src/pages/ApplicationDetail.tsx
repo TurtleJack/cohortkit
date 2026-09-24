@@ -150,10 +150,24 @@ function DecisionForm({ app, base, act, busy, manage, last }: { app: Application
 function OutcomeRecorded({ app, base, act, busy, manage }: { app: Application; base: string; act: ReturnType<typeof useWorkspace>['act']; busy: boolean; manage: boolean }) {
   const [reason, setReason] = useState('');
   const [open, setOpen] = useState(false);
+  const declined = app.outcome === 'rejected' || app.outcome === 'waitlist';
   return <div className="final-decision">
     <div className="inline"><Badge value={app.outcome!} /><p>{app.decisionNotes}</p></div>
     {manage && !open && <button className="text-button" onClick={() => setOpen(true)}><RotateCcw size={14} /> Reopen decision</button>}
     {open && <><Field label="Reason for reopening"><textarea value={reason} onChange={e => setReason(e.target.value)} /></Field>
       <div className="form-actions"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button variant="danger" busy={busy} disabled={reason.trim().length < 3} onClick={() => void act(() => api(`${base}/applications/${app.id}/reopen`, { reason, version: app.version }), 'Decision reopened').then(() => setOpen(false))}>Reopen decision</Button></div></>}
+    {manage && declined && <div className="summary-card" style={{ marginTop: 16 }}>
+      {app.feedback ? <>
+        <p>{app.feedback.text}</p>
+        <div className="inline" style={{ marginTop: 12 }}>
+          <Badge value={app.feedback.source} />
+          {app.feedback.approvedAt ? <Badge value="approved" /> : <Button variant="secondary" busy={busy} onClick={() => void act(() => api(`${base}/applications/${app.id}/feedback/approve`, { version: app.version }), 'Feedback approved')}>Approve feedback</Button>}
+          <Button variant="ghost" busy={busy} onClick={() => void act(() => api(`${base}/applications/${app.id}/feedback`, { version: app.version }), 'Feedback regenerated')}>Regenerate</Button>
+        </div>
+      </> : <>
+        <p className="muted">Approved feedback is included when the decision email is sent. AI drafts are respectful and specific — always review before approving.</p>
+        <Button busy={busy} onClick={() => void act(() => api(`${base}/applications/${app.id}/feedback`, { version: app.version }), 'Feedback drafted')}><Sparkles size={15} /> Draft feedback</Button>
+      </>}
+    </div>}
   </div>;
 }

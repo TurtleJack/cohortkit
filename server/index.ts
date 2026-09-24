@@ -4,7 +4,8 @@ import express from 'express';
 import { Store } from './db';
 import { seed } from './seed';
 import { createApi } from './api';
-import { createEmailAdapter, flushOutbox, queueDeadlineReminders, pendingEmails } from './email';
+import { createEmailAdapter, flushOutbox, queueDeadlineReminders } from './email';
+import { OpenAiProvider } from './ai';
 
 if(existsSync('.env'))process.loadEnvFile('.env');
 const production=process.env.NODE_ENV==='production';
@@ -17,7 +18,8 @@ if(production&&(!origin.startsWith('https://')||demo))throw new Error('Productio
 const store=new Store(process.env.DATABASE_PATH||'./data/cohortkit.db');
 if(demo)seed(store);
 const email=createEmailAdapter(process.env);
-const app=createApi(store,{origin,demo,secure:production,email,aiKey:process.env.OPENAI_API_KEY,aiModel:process.env.OPENAI_MODEL,stripeKey:process.env.STRIPE_SECRET_KEY,stripeWebhookSecret:process.env.STRIPE_WEBHOOK_SECRET,stripePrices:{starter:process.env.STRIPE_STARTER_PRICE_ID,growth:process.env.STRIPE_GROWTH_PRICE_ID}});
+const aiProvider=new OpenAiProvider(process.env.OPENAI_API_KEY||'',process.env.OPENAI_MODEL);
+const app=createApi(store,{origin,demo,secure:production,email,aiProvider,stripeKey:process.env.STRIPE_SECRET_KEY,stripeWebhookSecret:process.env.STRIPE_WEBHOOK_SECRET,stripePrices:{starter:process.env.STRIPE_STARTER_PRICE_ID,growth:process.env.STRIPE_GROWTH_PRICE_ID}});
 if(production){app.use(express.static(resolve('dist')));app.get('/{*path}',(_req,res)=>res.sendFile(resolve('dist/index.html')));}else{const {createServer}=await import('vite');const vite=await createServer({server:{middlewareMode:true},appType:'spa'});app.use(vite.middlewares);}
 const server=app.listen(port,host,()=>console.log(`CohortKit is running at ${origin}${demo?' (local synthetic demo)':''} — email via ${email.name}`));
 const outboxTimer=setInterval(()=>{void flushOutbox(store,email).catch(()=>{});},15000);

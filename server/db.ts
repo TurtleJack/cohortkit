@@ -43,6 +43,7 @@ export class Store {
       db => db.exec(`CREATE TABLE emails_new (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, email_to TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')), provider TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, dedupe_key TEXT, created_at TEXT NOT NULL, sent_at TEXT, html TEXT NOT NULL DEFAULT '', body_text TEXT NOT NULL DEFAULT '');
         INSERT INTO emails_new SELECT * FROM emails; DROP TABLE emails; ALTER TABLE emails_new RENAME TO emails;
         CREATE UNIQUE INDEX emails_dedupe ON emails(dedupe_key) WHERE dedupe_key IS NOT NULL;`),
+      db => db.exec(`ALTER TABLE cohorts ADD COLUMN summary TEXT;`),
     ];
     const row = this.get<{ version: number }>('SELECT max(version) version FROM schema_versions');
     for (let v = (row?.version || 0) + 1; v <= migrations.length + 1; v++) {

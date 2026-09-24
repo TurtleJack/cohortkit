@@ -5,6 +5,7 @@ import { Store } from '../server/db';
 import { createApi } from '../server/api';
 import { defaultCohort, type Workspace, type Application } from '../shared/domain';
 import { type EmailAdapter, type EmailMessage } from '../server/email';
+import { OpenAiProvider } from '../server/ai';
 
 class SilentAdapter implements EmailAdapter {
   name = 'silent';
@@ -24,7 +25,7 @@ function agent() { return request.agent(app); }
 
 beforeAll(() => {
   store = new Store(':memory:');
-  app = createApi(store, { origin, demo: false, secure: false, email });
+  app = createApi(store, { origin, demo: false, secure: false, email, aiProvider: new OpenAiProvider('') });
 });
 
 const config = () => ({ ...defaultCohort(), name: 'Test Cohort', status: 'open' as const });
