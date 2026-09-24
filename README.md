@@ -6,14 +6,21 @@ CohortKit helps you run your program's selection process with clarity: publish a
 
 Built from the workflow proven by the Oregon AI Accelerator's 2026 cohort process (175 applications → 20 accepted).
 
+## Screenshots
+
+| Admin overview | Selection pipeline | Public apply portal |
+|:---:|:---:|:---:|
+| ![Overview](docs/images/overview.png) | ![Pipeline](docs/images/workflow.png) | ![Apply](docs/images/apply-portal.png) |
+
 ## Features
 
-- **Configurable intake** — build application questions, qualification checks, deadlines, and capacity per cohort. Everything is data-driven: no code changes to run your program.
+- **Configurable intake** — build application questions, qualification checks, deadlines, capacity, and portal FAQs per cohort. Everything is data-driven: no code changes to run your program.
 - **Weighted scoring rubrics** — define your own criteria and weights per cohort (1–5 stars), not a fixed template.
-- **Review workflow** — assigned or pool-based review, balanced reviewer assignments, conflict recusal, Champion designation, atomic save-and-next with keyboard actions.
+- **Review workflow** — assigned or pool-based review, balanced reviewer assignments, conflict recusal, Champion designation, and atomic save-and-next.
 - **Selection pipeline** — stages from screening to final selection, coverage rules, reasoned admin overrides, capacity-checked decisions.
-- **AI in an assistant role** — extractive source briefs (no hallucination) plus optional AI-drafted briefs with human approval. AI output is always a draft until a human approves it.
+- **AI in an assistant role** — extractive source briefs (no hallucination) plus optional AI-drafted briefs with human approval. An AI setup wizard proposes your rubric, questions, and stages; you review and edit. AI output is always a draft until a human approves it.
 - **Tenancy & security** — each organization gets its own workspace, roles (owner/admin/committee/reviewer), server-enforced access, HTTP-only sessions, invitation capabilities, and an immutable audit trail.
+- **Transactional email** — pluggable providers (Resend, SMTP, or console), an outbox with retries, and deadline reminders. Invitation and status links stay copyable without email.
 - **Self-hostable** — a single Node process and one SQLite database. No cloud services required.
 
 ## Quickstart
@@ -51,7 +58,7 @@ Copy `.env.example` to `.env`. Key settings:
 | `OPENAI_API_KEY` | Enables AI-drafted briefs (explicit admin action) |
 | `STRIPE_SECRET_KEY` + price IDs | Enables subscription billing (optional) |
 
-See [docs/](docs/) for the delivery plan and architecture decisions.
+See [docs/](docs/) for the delivery plan, architecture decisions, operations guide, and release process.
 
 ## How the workflow works
 
@@ -61,10 +68,10 @@ See [docs/](docs/) for the delivery plan and architecture decisions.
 4. **Selection** — applications move through configurable stages. Committee members record interviews and final decisions; capacity limits are enforced.
 5. **Audit** — every change is recorded with its actor and reason.
 
+## Contributing
+
+Pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Security reports go to the maintainers per [SECURITY.md](SECURITY.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
-
-## Status
-
-Early development. The core workflow is functional end-to-end with demo data; see [docs/02-delivery-plan.md](docs/02-delivery-plan.md) for the roadmap. Contributions welcome.
