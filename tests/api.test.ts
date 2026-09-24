@@ -4,6 +4,14 @@ import type { Express } from 'express';
 import { Store } from '../server/db';
 import { createApi } from '../server/api';
 import { defaultCohort, type Workspace, type Application } from '../shared/domain';
+import { type EmailAdapter, type EmailMessage } from '../server/email';
+
+class SilentAdapter implements EmailAdapter {
+  name = 'silent';
+  sent: EmailMessage[] = [];
+  async send(message: EmailMessage) { this.sent.push(message); }
+}
+const email = new SilentAdapter();
 
 type PublicCohort = { organization: { name: string; slug: string }; cohort: { id: string; name: string; slug: string; questions: { id: string; label: string; type: string }[]; qualifications: { id: string }[] }; accepting: boolean };
 
@@ -16,7 +24,7 @@ function agent() { return request.agent(app); }
 
 beforeAll(() => {
   store = new Store(':memory:');
-  app = createApi(store, { origin, demo: false, secure: false });
+  app = createApi(store, { origin, demo: false, secure: false, email });
 });
 
 const config = () => ({ ...defaultCohort(), name: 'Test Cohort', status: 'open' as const });

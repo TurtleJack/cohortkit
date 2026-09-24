@@ -48,7 +48,7 @@ export interface ApplicantData { startupName: string; founderName: string; email
 export const applicantSchema = z.object({ startupName: text(150), founderName: text(120), email: z.email().max(250).transform(s => s.toLowerCase()), industry: text(100), location: text(120), companyStage: z.enum(['Idea','Prototype','MVP','Revenue','Growth']), answers: z.record(identifier,z.string().trim().max(10000)), qualifications: z.record(identifier,z.boolean()), consent: z.literal(true) });
 export interface Application extends ApplicantData {
   id: string; orgId: string; cohortId: string; stageId: string; status: 'draft'|'submitted'; pool: typeof pools[number];
-  scrubbedAt: string|null; scrubNotes: string; brief: Brief|null; outcome: Outcome|null; decisionNotes: string;
+  scrubbedAt: string|null; scrubNotes: string; brief: Brief|null; outcome: Outcome|null; decisionNotes: string; feedback: string|null;
   interview: { status: 'none'|'ready'|'invited'|'scheduled'|'completed'|'no_show'|'canceled'; scheduledAt: string; notes: string };
   createdAt: string; submittedAt: string|null; version: number; reviews: Review[]; assignedReviewerIds: string[]; recusedReviewerIds: string[];
 }

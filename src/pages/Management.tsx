@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { Users, Plus, Trash2, SlidersHorizontal, Shield, Settings, ArrowUpRight, Check, CreditCard, FileText, Star, Layers, X, CalendarDays, ListChecks, Scale, HelpCircle } from 'lucide-react';
+import { Users, Plus, Trash2, SlidersHorizontal, Shield, Settings, ArrowUpRight, Check, CreditCard, FileText, Star, Layers, X, CalendarDays, ListChecks, Scale, HelpCircle, Mail } from 'lucide-react';
+import { useEffect } from 'react';
 import { useWorkspace, useSession } from '../App';
 import { Avatar, Badge, Button, Empty, PageHeading, SectionTitle, Field, Modal, LinkBox, CheckField, ErrorMessage } from '../ui';
 import { canManage, plans, modules, label, defaultCohort, type Cohort, type CohortConfig, type Criterion, type Question, type Qualification, type Stage, type Module } from '../../shared/domain';
@@ -204,6 +205,21 @@ function Faqs({ config, setConfig }: { config: CohortConfig; setConfig: (c: Coho
       <Field label="Answer"><textarea value={f.answer} onChange={e => set(i, { answer: e.target.value })} /></Field>
     </div><button className="icon-button" aria-label={`Remove ${f.question}`} onClick={() => setConfig({ ...config, faqs: config.faqs.filter((_, n) => n !== i) })}><X size={17} /></button></div>)}
     {!config.faqs.length && <Empty title="No FAQs yet" description="Applicants see these answers before they start the form." />}
+  </>;
+}
+
+export function EmailLogPage() {
+  const { workspace, base } = useWorkspace();
+  interface EmailRow { id: string; to: string; subject: string; status: 'pending' | 'sent' | 'failed'; provider: string; error: string; attempts: number; createdAt: string; sentAt: string | null }
+  const [rows, setRows] = useState<EmailRow[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => { api<EmailRow[]>(`${base}/emails`).then(setRows).catch(e => setError(e.message)); }, [base]);
+  if (!canManage(workspace.organization.role)) return <Navigate to="../review" replace />;
+  return <>
+    <PageHeading eyebrow="WORKSPACE" title="Email log" description="Every transactional email queued by this workspace, with delivery status and retries." />
+    {error && <div className="notice">{error}</div>}
+    <section className="panel"><div className="email-log">{(rows || []).map(r => <div className="email-row" key={r.id}><span className="invitation-icon"><Mail size={16} /></span><div><strong>{r.subject}</strong><small>to {r.to} · queued {new Date(r.createdAt).toLocaleString()}</small></div><Badge value={r.status} /><small className="muted">{r.provider || '—'}{r.error ? ` · ${r.error}` : ''}</small></div>)}
+      {rows && !rows.length && <Empty title="No email yet" description="Transactional email appears here as invitations, receipts, and decisions are sent." />}</div></section>
   </>;
 }
 

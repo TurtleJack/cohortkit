@@ -31,20 +31,24 @@ export class Store {
     this.migrate();
   }
   // Additive, numbered migrations. Never edit an applied migration; append a new one.
+  // Entries are versions 2..N (v1 is the baseline schema above).
   migrate() {
     const migrations: ((db: DatabaseSync) => void)[] = [
-      // v1 is the baseline schema above.
       db => db.exec(`ALTER TABLE organizations ADD COLUMN branding TEXT NOT NULL DEFAULT '{"accent":"#285d4e","footer":"Better decisions. Stronger cohorts.","senderName":"","logoUrl":""}';`),
       db => db.exec(`CREATE TABLE emails (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, email_to TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')), provider TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, dedupe_key TEXT, created_at TEXT NOT NULL, sent_at TEXT, FOREIGN KEY(org_id) REFERENCES organizations(id));
         CREATE UNIQUE INDEX emails_dedupe ON emails(dedupe_key) WHERE dedupe_key IS NOT NULL;`),
       db => db.exec(`CREATE TABLE status_access (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, app_id TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(org_id,app_id) REFERENCES applications(org_id,id));`),
       db => db.exec(`ALTER TABLE applications ADD COLUMN feedback TEXT;`),
+      db => db.exec(`ALTER TABLE emails ADD COLUMN html TEXT NOT NULL DEFAULT ''; ALTER TABLE emails ADD COLUMN body_text TEXT NOT NULL DEFAULT '';`),
+      db => db.exec(`CREATE TABLE emails_new (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, email_to TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')), provider TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, dedupe_key TEXT, created_at TEXT NOT NULL, sent_at TEXT, html TEXT NOT NULL DEFAULT '', body_text TEXT NOT NULL DEFAULT '');
+        INSERT INTO emails_new SELECT * FROM emails; DROP TABLE emails; ALTER TABLE emails_new RENAME TO emails;
+        CREATE UNIQUE INDEX emails_dedupe ON emails(dedupe_key) WHERE dedupe_key IS NOT NULL;`),
     ];
     const row = this.get<{ version: number }>('SELECT max(version) version FROM schema_versions');
-    for (let v = (row?.version || 0) + 1; v <= migrations.length; v++) {
+    for (let v = (row?.version || 0) + 1; v <= migrations.length + 1; v++) {
       this.db.exec('BEGIN IMMEDIATE');
       try {
-        migrations[v - 1](this.db);
+        migrations[v - 2](this.db);
         this.db.prepare('INSERT INTO schema_versions VALUES(?,?)').run(v, now());
         this.db.exec('COMMIT');
       } catch (e) { this.db.exec('ROLLBACK'); throw e; }
