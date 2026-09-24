@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileText, Sparkles, Star, CheckCircle2, Clock, ArrowRight, RotateCcw, Users } from 'lucide-react';
 import { useWorkspace } from '../App';
 import { Badge, Button, Field, CheckField, Modal, Empty, date } from '../ui';
@@ -30,9 +30,11 @@ export function ApplicationDetail({ application: app, onClose }: { application: 
 }
 
 function ApplicationTab({ app }: { app: Application }) {
-  const { cohort } = useWorkspace();
+  const { cohort, base } = useWorkspace();
+  const [access, setAccess] = useState<{ count: number; lastAt: string | null } | null>(null);
+  useEffect(() => { void api<{ count: number; lastAt: string | null }>(`${base}/applications/${app.id}/access`).then(setAccess).catch(() => {}); }, [base, app.id]);
   return <div>
-    <section className="application-intro"><div className="startup-heading"><FileText size={22} /><div><h3>{app.startupName}</h3><p>{app.founderName} · {app.email || 'Email hidden'} · {app.location}</p><div className="intro-meta"><span className="industry-pill">{app.industry}</span><Badge value={label(app.companyStage)} /></div></div></div></section>
+    <section className="application-intro"><div className="startup-heading"><FileText size={22} /><div><h3>{app.startupName}</h3><p>{app.founderName} · {app.email || 'Email hidden'} · {app.location}</p><div className="intro-meta"><span className="industry-pill">{app.industry}</span><Badge value={label(app.companyStage)} /></div>{access && access.count > 0 && <small className="muted">Status link viewed {access.count} time{access.count !== 1 ? 's' : ''}{access.lastAt ? ` · last ${date(access.lastAt)}` : ''}</small>}</div></div></section>
     <div className="source-answers">{cohort!.questions.filter(q => app.answers[q.id]).map(q => <article key={q.id}><strong>{q.label}</strong><p>{app.answers[q.id]}</p></article>)}</div>
     {cohort!.qualifications.length > 0 && <section className="qualification-check">{cohort!.qualifications.map(q => <label className="check-field" key={q.id}><input type="checkbox" checked={!!app.qualifications[q.id]} readOnly /><span><strong>{q.label}</strong></span></label>)}</section>}
   </div>;

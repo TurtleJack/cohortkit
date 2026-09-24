@@ -90,6 +90,14 @@ describe('intake, preparation, review, and decision', () => {
     expect(submit.status).toBe(200);
     expect(submit.body.version).toBe(2);
     appId = draft.body.id;
+
+    // Status-link analytics: each private status view is recorded.
+    await request(app).get('/api/public/application').set('Authorization', `Bearer ${applicantToken}`);
+    await request(app).get('/api/public/application').set('Authorization', `Bearer ${applicantToken}`);
+    const access = await admin.get(`/api/orgs/${orgId}/applications/${appId}/access`);
+    expect(access.status).toBe(200);
+    expect(access.body.count).toBeGreaterThanOrEqual(2);
+    expect(access.body.lastAt).toBeTruthy();
   });
 
   it('blocks duplicate applications for the same email', async () => {

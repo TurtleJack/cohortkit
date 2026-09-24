@@ -71,17 +71,24 @@ export async function flushOutbox(store: Store, adapter: EmailAdapter): Promise<
 export function pendingEmails(store: Store) { return store.get<{ n: number }>("SELECT count(*) n FROM emails WHERE status='pending'")?.n ?? 0; }
 
 // Queue deadline reminders for open cohorts closing within 48 hours.
+// Cohort configs are scanned in the application layer so this works on both SQLite and Postgres.
 export function queueDeadlineReminders(store: Store, origin: string, hoursAhead = 48) {
-  const soon = new Date(Date.now() + hoursAhead * 3600000).toISOString();
-  const cohorts = store.all<{ id: string; org_id: string; config: string; slug: string }>("SELECT c.id,c.org_id,c.config,c.slug FROM cohorts c JOIN organizations o ON o.id=c.org_id WHERE json_extract(c.config,'$.status')='open' AND json_extract(c.config,'$.deadline')<? AND json_extract(c.config,'$.deadline')>?", soon, now());
+  const nowMs = Date.now();
+  const soonMs = nowMs + hoursAhead * 3600000;
+  const cohorts = store.all<{ id: string; org_id: string; config: string }>("SELECT id,org_id,config FROM cohorts");
+  const orgs = store.all<{ id: string; name: string; branding: string }>('SELECT id,name,branding FROM organizations');
+  const orgById = new Map(orgs.map(o => [o.id, o]));
   let queued = 0;
   for (const cohort of cohorts) {
     const config = JSON.parse(cohort.config);
-    const org = store.get<{ name: string; branding: string }>('SELECT name,branding FROM organizations WHERE id=?', cohort.org_id);
+    if (config.status !== 'open') continue;
+    const deadline = Date.parse(config.deadline);
+    if (!(deadline > nowMs && deadline < soonMs)) continue;
+    const org = orgById.get(cohort.org_id);
     const apps = store.all<{ id: string; email: string; data: string }>("SELECT id,email,data FROM applications WHERE org_id=? AND cohort_id=? AND status='submitted' AND outcome IS NULL", cohort.org_id, cohort.id);
     for (const app of apps) {
       const startup = JSON.parse(app.data).startupName;
-      const message = reminderMessage(org!.name, config.name, config.deadline, startup, `${origin}/application/`);
+      const message = reminderMessage(org?.name || 'Cohort', config.name, config.deadline, startup, `${origin}/application/`);
       if (enqueue(store, cohort.org_id, { to: app.email, ...message }, `reminder:${cohort.id}:${app.id}`)) queued++;
     }
   }
