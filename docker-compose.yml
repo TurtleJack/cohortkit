@@ -1,0 +1,17 @@
+services:
+  cohortkit:
+    build: .
+    ports:
+      - "3100:3100"
+    environment:
+      PORT: 3100
+      HOST: 0.0.0.0
+      APP_ORIGIN: http://localhost:3100
+      DATABASE_PATH: /data/cohortkit.db
+      DEMO_MODE: "false"
+    volumes:
+      - cohortkit-data:/data
+    restart: unless-stopped
+
+volumes:
+  cohortkit-data:
