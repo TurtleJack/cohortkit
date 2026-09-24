@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CheckCircle2, ChevronRight, ClipboardCheck, Layers, Lock, Sprout, ArrowRight } from 'lucide-react';
 import { Brand, Button, Field, CheckField, ErrorMessage, Loading, date } from '../ui';
-import { label, type ApplicantData } from '../../shared/domain';
+import { label, type ApplicantData, type Branding, type Faq } from '../../shared/domain';
 import { api } from '../api';
 
-interface PublicCohort { organization: { name: string; slug: string }; cohort: { id: string; name: string; description: string; deadline: string; capacity: number; questions: { id: string; label: string; type: string; required: boolean; options: string[] }[]; qualifications: { id: string; label: string; required: boolean }[]; status: string; slug: string }; accepting: boolean }
+interface PublicCohort { organization: { name: string; slug: string; branding: Branding }; cohort: { id: string; name: string; description: string; deadline: string; capacity: number; questions: { id: string; label: string; type: string; required: boolean; options: string[] }[]; qualifications: { id: string; label: string; required: boolean }[]; faqs: Faq[]; status: string; slug: string }; accepting: boolean }
 interface DraftState { application: ApplicantData & { status: string; submittedAt: string | null; version: number }; cohortName: string; orgSlug: string; cohortSlug: string }
 
 function draftKey(orgSlug?: string, cohortSlug?: string) { return `ck-draft-${orgSlug}-${cohortSlug}`; }
@@ -29,6 +29,8 @@ export function ApplyPage() {
   if (error && !info) return <div className="center-screen"><ErrorMessage error={error} /><Link to="/" className="text-link">Back to CohortKit</Link></div>;
   if (!info) return <div className="center-screen"><Loading /></div>;
   const { cohort, organization, accepting } = info;
+  const branding = organization.branding;
+  const daysLeft = Math.max(0, Math.ceil((new Date(cohort.deadline).getTime() - Date.now()) / 86400000));
   const set = (patch: Partial<ApplicantData>) => setData(d => ({ ...d, ...patch }));
   const setAnswer = (id: string, value: string) => setData(d => ({ ...d, answers: { ...d.answers, [id]: value } }));
   const run = async (submit: boolean) => {
@@ -47,10 +49,10 @@ export function ApplyPage() {
   if (submitted) return <div className="center-screen"><div className="status-page"><div className="completion-icon"><CheckCircle2 size={30} /></div><h1>Application submitted.</h1><p>Thank you for applying to <strong>{cohort.name}</strong>. The organizing team will review your application. Decisions are shared through your private status link — save it somewhere safe.</p>
     <div className="private-link"><span><Lock size={15} /> Your private status link</span><input readOnly value={`${location.origin}/application/${token}`} onFocus={e => e.target.select()} /><small>Applications received before {date(cohort.deadline)} are considered for the cohort.</small></div>
     <Link className="btn secondary" to={`/application/${token}`}>Open status page <ArrowRight size={15} /></Link></div></div>;
-  return <div className="intake-layout">
-    <aside className="intake-story"><Link to="/" className="brand-link"><Brand light /></Link><div><div className="eyebrow">APPLICATIONS FOR</div><h1>{cohort.name}</h1><p>{cohort.description}</p><div className="intake-facts"><span><ClipboardCheck size={15} /> {cohort.questions.length} questions</span><span><Sprout size={15} /> {cohort.capacity} cohort spots</span><span>Closes {date(cohort.deadline)}</span></div></div><div className="intake-note"><Layers size={18} /><p><strong>Your answers stay private.</strong> Only the organizing team and assigned reviewers see them.</p></div><p className="powered-by">Powered by CohortKit — open-source software for programs that back what's next.</p></aside>
+  return <div className="intake-layout" style={{ '--green': branding.accent } as CSSProperties}>
+    <aside className="intake-story"><Link to="/" className="brand-link"><Brand light /></Link><div><div className="eyebrow">APPLICATIONS FOR</div><h1>{cohort.name}</h1><p>{cohort.description}</p><div className="intake-facts"><span><ClipboardCheck size={15} /> {cohort.questions.length} questions</span><span><Sprout size={15} /> {cohort.capacity} cohort spots</span><span>Closes {date(cohort.deadline)}</span></div></div><div className="intake-note"><Layers size={18} /><p><strong>Your answers stay private.</strong> Only the organizing team and assigned reviewers see them.</p></div><p className="powered-by">{branding.footer || 'Powered by CohortKit — open-source software for programs that back what\u2019s next.'}</p></aside>
     <main className="intake-form">
-      <div className="public-header"><div><h2>Apply to {cohort.name}</h2><p>Drafts save automatically to this browser. You can leave and continue later.</p></div></div>
+      <div className="public-header"><div>{branding.logoUrl && <img className="portal-logo" src={branding.logoUrl} alt={organization.name} />}<h2>Apply to {cohort.name}</h2><p>Drafts save automatically to this browser. You can leave and continue later.</p></div><div className="countdown"><span>{daysLeft}</span><small>days left</small></div></div>
       {!accepting && <div className="notice">Applications for this cohort are currently closed.</div>}
       <ErrorMessage error={error} />
       <div className="intake-steps"><span className="current"><b>1</b> About your startup</span><ChevronRight size={14} /><span><b>2</b> Your answers</span><ChevronRight size={14} /><span><b>3</b> Review & submit</span></div>
@@ -73,6 +75,7 @@ export function ApplyPage() {
         <CheckField label="I confirm the information in this application is accurate, and I agree to the program's terms." checked={data.consent} onChange={v => set({ consent: v })} />
         <div className="intake-actions"><Button variant="secondary" type="button" disabled={!accepting} busy={busy} onClick={() => void run(false)}>Save draft</Button><Button type="submit" disabled={!accepting || !data.consent} busy={busy}>Submit application <ArrowRight size={16} /></Button></div>
       </form>
+      {cohort.faqs.length > 0 && <section className="faq-list"><h3>Frequently asked questions</h3>{cohort.faqs.map((f, i) => <details key={i}><summary>{f.question}</summary><p>{f.answer}</p></details>)}</section>}
     </main>
   </div>;
 }

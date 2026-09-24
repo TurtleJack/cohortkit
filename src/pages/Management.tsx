@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { Users, Plus, Trash2, SlidersHorizontal, Shield, Settings, ArrowUpRight, Check, CreditCard, FileText, Star, Layers, X, CalendarDays, ListChecks, Scale } from 'lucide-react';
+import { Users, Plus, Trash2, SlidersHorizontal, Shield, Settings, ArrowUpRight, Check, CreditCard, FileText, Star, Layers, X, CalendarDays, ListChecks, Scale, HelpCircle } from 'lucide-react';
 import { useWorkspace, useSession } from '../App';
 import { Avatar, Badge, Button, Empty, PageHeading, SectionTitle, Field, Modal, LinkBox, CheckField, ErrorMessage } from '../ui';
 import { canManage, plans, modules, label, defaultCohort, type Cohort, type CohortConfig, type Criterion, type Question, type Qualification, type Stage, type Module } from '../../shared/domain';
@@ -36,10 +36,12 @@ export function SettingsPage() {
   const { workspace, base, act, busy } = useWorkspace();
   const [name, setName] = useState(workspace.organization.name);
   const [activeModules, setActiveModules] = useState<Module[]>(workspace.organization.modules);
+  const [branding, setBranding] = useState(workspace.organization.branding);
   const billingNote = new URLSearchParams(location.search).get('billing');
   if (!canManage(workspace.organization.role)) return <Navigate to="../review" replace />;
   const org = workspace.organization;
   const status = org.subscriptionStatus;
+  const save = (modules: Module[]) => act(() => api(`${base}/settings`, { name, modules, branding }, 'PATCH'), 'Settings saved');
   return <>
     <PageHeading eyebrow="WORKSPACE" title="Settings & billing" description="Shape your workspace, choose what is enabled, and manage your plan." />
     {billingNote && <div className={`notice ${billingNote === 'success' ? 'success-note' : ''}`}>{billingNote === 'success' ? 'Billing setup complete. Your subscription will appear here shortly.' : 'Billing setup was canceled.'}</div>}
@@ -48,12 +50,23 @@ export function SettingsPage() {
         <div className="setup-panel" style={{ padding: 0 }}>
           <Field label="Organization name"><input value={name} onChange={e => setName(e.target.value)} /></Field>
           <Field label="Workspace URL"><input readOnly value={`${location.origin}/apply/${org.slug}`} onFocus={e => e.target.select()} /></Field>
-          <div className="form-actions" style={{ marginTop: 0 }}><Button busy={busy} onClick={() => void act(() => api(`${base}/settings`, { name, modules: activeModules }, 'PATCH'), 'Settings saved')}>Save changes</Button></div>
+          <div className="form-actions" style={{ marginTop: 0 }}><Button busy={busy} onClick={() => void save(activeModules)}>Save changes</Button></div>
+        </div>
+      </section>
+      <section className="panel settings-card"><SectionTitle title="Portal branding" description="Colors, logo, and copy shown on your public application portal." />
+        <div className="setup-panel" style={{ padding: 0 }}>
+          <div className="form-grid">
+            <Field label="Accent color"><input type="color" value={branding.accent} onChange={e => setBranding({ ...branding, accent: e.target.value })} /></Field>
+            <Field label="Logo URL" hint="Optional. Served from any public URL."><input value={branding.logoUrl} placeholder="https://…/logo.png" onChange={e => setBranding({ ...branding, logoUrl: e.target.value })} /></Field>
+          </div>
+          <Field label="Portal footer"><input value={branding.footer} onChange={e => setBranding({ ...branding, footer: e.target.value })} /></Field>
+          <Field label="Email sender name" hint="The 'from' name on transactional email."><input value={branding.senderName} placeholder={name} onChange={e => setBranding({ ...branding, senderName: e.target.value })} /></Field>
+          <div className="form-actions" style={{ marginTop: 0 }}><Button busy={busy} onClick={() => void save(activeModules)}>Save branding</Button></div>
         </div>
       </section>
       <section className="panel settings-card"><SectionTitle title="Enabled components" description="Turn product areas on or off for this workspace." />
         <div className="setup-panel" style={{ padding: 0 }}>
-          {modules.map(m => <label className="check-field" key={m}><input type="checkbox" checked={activeModules.includes(m)} onChange={e => { setActiveModules(s => e.target.checked ? [...s, m] : s.filter(x => x !== m)); void act(() => api(`${base}/settings`, { name, modules: e.target.checked ? [...activeModules, m] : activeModules.filter(x => x !== m) }, 'PATCH'), `Component ${e.target.checked ? 'enabled' : 'disabled'}`); }} /><span><strong>{label(m)}</strong><small>{m === 'intake' ? 'Public application portal and intake administration.' : m === 'review' ? 'Reviewer workspace, assignments, and the selection pipeline.' : 'AI-drafted briefs and provider configuration.'}</small></span></label>)}
+          {modules.map(m => <label className="check-field" key={m}><input type="checkbox" checked={activeModules.includes(m)} onChange={e => { const next = e.target.checked ? [...activeModules, m] : activeModules.filter(x => x !== m); setActiveModules(next); void save(next); }} /><span><strong>{label(m)}</strong><small>{m === 'intake' ? 'Public application portal and intake administration.' : m === 'review' ? 'Reviewer workspace, assignments, and the selection pipeline.' : 'AI-drafted briefs and provider configuration.'}</small></span></label>)}
         </div>
       </section>
       <section className="panel settings-card"><SectionTitle title="Integrations" description="Live adapters require configured credentials." />
@@ -78,7 +91,7 @@ export function CohortEditor() {
   const { workspace, cohort, base, act, busy, selectCohort } = useWorkspace();
   const isNew = !cohort;
   const [config, setConfig] = useState<CohortConfig>(() => ({ ...(cohort ? structuredClone(cohort) : defaultCohort()) }));
-  const [tab, setTab] = useState<'general' | 'questions' | 'qualifications' | 'rubric' | 'stages'>('general');
+  const [tab, setTab] = useState<'general' | 'questions' | 'qualifications' | 'rubric' | 'stages' | 'faqs'>('general');
   if (!canManage(workspace.organization.role)) return <Navigate to="../review" replace />;
   const locked = !isNew && cohort!.applicationCount !== undefined && cohort!.applicationCount > 0;
   const bump = (list: { id: string }[], prefix: string) => `${prefix}${list.reduce((m, x) => { const n = Number(x.id.match(/\d+$/)?.[0]); return Number.isFinite(n) ? Math.max(m, n + 1) : m; }, 1)}`;
@@ -89,8 +102,8 @@ export function CohortEditor() {
     }
     return api(`${base}/cohorts/${cohort!.id}`, { config, version: cohort!.version }, 'PUT');
   }, isNew ? 'Cohort created' : 'Cohort saved');
-  const sections: { id: 'general' | 'questions' | 'qualifications' | 'rubric' | 'stages'; label: string; icon: typeof SlidersHorizontal }[] = [
-    { id: 'general', label: 'General', icon: SlidersHorizontal }, { id: 'questions', label: 'Application questions', icon: FileText }, { id: 'qualifications', label: 'Qualifications', icon: ListChecks }, { id: 'rubric', label: 'Scoring rubric', icon: Star }, { id: 'stages', label: 'Workflow stages', icon: Layers },
+  const sections: { id: 'general' | 'questions' | 'qualifications' | 'rubric' | 'stages' | 'faqs'; label: string; icon: typeof SlidersHorizontal }[] = [
+    { id: 'general', label: 'General', icon: SlidersHorizontal }, { id: 'questions', label: 'Application questions', icon: FileText }, { id: 'qualifications', label: 'Qualifications', icon: ListChecks }, { id: 'rubric', label: 'Scoring rubric', icon: Star }, { id: 'stages', label: 'Workflow stages', icon: Layers }, { id: 'faqs', label: 'Portal FAQs', icon: HelpCircle },
   ];
   return <>
     <PageHeading eyebrow="COHORT SETUP" title={isNew ? 'Build your first cohort' : config.name || 'Cohort setup'} description="Everything about how you evaluate founders is configurable here — questions, checks, scoring, and stages." actions={<Button busy={busy} onClick={save}>{isNew ? 'Create cohort' : 'Save changes'} <Check size={16} /></Button>} />
@@ -105,6 +118,7 @@ export function CohortEditor() {
         {tab === 'qualifications' && <Qualifications config={config} setConfig={setConfig} bump={() => bump(config.qualifications, 'g')} />}
         {tab === 'rubric' && <Rubric config={config} setConfig={setConfig} bump={() => bump(config.rubric, 'c')} />}
         {tab === 'stages' && <Stages config={config} setConfig={setConfig} bump={() => bump(config.stages, 's')} />}
+        {tab === 'faqs' && <Faqs config={config} setConfig={setConfig} />}
         <div className="form-actions"><Button busy={busy} onClick={save}>{isNew ? 'Create cohort' : 'Save changes'} <Check size={16} /></Button></div>
       </section>
     </div>
@@ -178,6 +192,18 @@ function Stages({ config, setConfig, bump }: { config: CohortConfig; setConfig: 
       <Field label="Reviews required to advance"><input type="number" min={0} max={10} value={s.minReviews} onChange={e => set(s.id, { minReviews: Number(e.target.value) })} /></Field>
     </div><button className="icon-button" aria-label={`Remove ${s.label}`} onClick={() => setConfig({ ...config, stages: config.stages.filter(x => x.id !== s.id) })}><X size={17} /></button></div>)}
     <p className="help-text">{config.stages.length ? `${label(config.stages[config.stages.length - 1].label)} is the final stage — that is where final decisions are recorded.` : 'Add at least two stages.'}</p>
+  </>;
+}
+
+function Faqs({ config, setConfig }: { config: CohortConfig; setConfig: (c: CohortConfig) => void }) {
+  const set = (i: number, patch: Partial<CohortConfig['faqs'][number]>) => setConfig({ ...config, faqs: config.faqs.map((f, n) => n === i ? { ...f, ...patch } : f) });
+  return <>
+    <SectionTitle title="Portal FAQs" description="Answers shown on the public application portal. Up to 8." action={<Button variant="secondary" onClick={() => setConfig({ ...config, faqs: [...config.faqs, { question: 'Who should apply?', answer: '' }] })}><Plus size={15} /> Add FAQ</Button>} />
+    {config.faqs.map((f, i) => <div className="builder-item" key={i}><span className="builder-number">{String(i + 1).padStart(2, '0')}</span><div>
+      <Field label="Question"><input value={f.question} onChange={e => set(i, { question: e.target.value })} /></Field>
+      <Field label="Answer"><textarea value={f.answer} onChange={e => set(i, { answer: e.target.value })} /></Field>
+    </div><button className="icon-button" aria-label={`Remove ${f.question}`} onClick={() => setConfig({ ...config, faqs: config.faqs.filter((_, n) => n !== i) })}><X size={17} /></button></div>)}
+    {!config.faqs.length && <Empty title="No FAQs yet" description="Applicants see these answers before they start the form." />}
   </>;
 }
 

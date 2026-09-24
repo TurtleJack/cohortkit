@@ -28,6 +28,27 @@ export class Store {
       CREATE INDEX IF NOT EXISTS assignments_reviewer ON assignments(org_id,reviewer_id,stage_id);
       INSERT OR IGNORE INTO schema_versions VALUES(1,datetime('now'));
     `);
+    this.migrate();
+  }
+  // Additive, numbered migrations. Never edit an applied migration; append a new one.
+  migrate() {
+    const migrations: ((db: DatabaseSync) => void)[] = [
+      // v1 is the baseline schema above.
+      db => db.exec(`ALTER TABLE organizations ADD COLUMN branding TEXT NOT NULL DEFAULT '{"accent":"#285d4e","footer":"Better decisions. Stronger cohorts.","senderName":"","logoUrl":""}';`),
+      db => db.exec(`CREATE TABLE emails (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, email_to TEXT NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')), provider TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, dedupe_key TEXT, created_at TEXT NOT NULL, sent_at TEXT, FOREIGN KEY(org_id) REFERENCES organizations(id));
+        CREATE UNIQUE INDEX emails_dedupe ON emails(dedupe_key) WHERE dedupe_key IS NOT NULL;`),
+      db => db.exec(`CREATE TABLE status_access (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, app_id TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(org_id,app_id) REFERENCES applications(org_id,id));`),
+      db => db.exec(`ALTER TABLE applications ADD COLUMN feedback TEXT;`),
+    ];
+    const row = this.get<{ version: number }>('SELECT max(version) version FROM schema_versions');
+    for (let v = (row?.version || 0) + 1; v <= migrations.length; v++) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        migrations[v - 1](this.db);
+        this.db.prepare('INSERT INTO schema_versions VALUES(?,?)').run(v, now());
+        this.db.exec('COMMIT');
+      } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+    }
   }
   get<T>(sql: string, ...params: SQLInputValue[]): T|undefined { return this.db.prepare(sql).get(...params) as T|undefined; }
   all<T>(sql: string, ...params: SQLInputValue[]): T[] { return this.db.prepare(sql).all(...params) as T[]; }

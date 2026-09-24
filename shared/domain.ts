@@ -14,11 +14,16 @@ export type Plan = keyof typeof plans;
 export const modules = ['intake', 'review', 'ai'] as const;
 export type Module = typeof modules[number];
 export interface Criterion { id: string; label: string; description: string; weight: number }
+export interface Faq { question: string; answer: string }
+export interface Branding { accent: string; footer: string; senderName: string; logoUrl: string }
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+export const brandingSchema = z.object({ accent: hexColor, footer: z.string().trim().max(300), senderName: z.string().trim().max(120), logoUrl: z.union([z.literal(''), z.url().max(500)]) });
 export interface Question { id: string; label: string; type: 'text' | 'textarea' | 'url' | 'select'; required: boolean; options: string[] }
 export interface Qualification { id: string; label: string; required: boolean }
 export interface Stage { id: string; label: string; minReviews: number }
 const identifier = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
 const text = (max = 200) => z.string().trim().min(1).max(max);
+export const faqSchema = z.object({ question: text(300), answer: text(2000) });
 export const criterionSchema = z.object({ id: identifier, label: text(80), description: z.string().trim().max(500), weight: z.number().min(0.1).max(100) });
 export const questionSchema = z.object({ id: identifier, label: text(200), type: z.enum(['text','textarea','url','select']), required: z.boolean(), options: z.array(text(100)).max(30) }).refine(q => q.type !== 'select' || q.options.length > 0, 'Select questions need options');
 export const qualificationSchema = z.object({ id: identifier, label: text(300), required: z.boolean() });
@@ -30,11 +35,12 @@ export const cohortSchema = z.object({
   questions: z.array(questionSchema).min(1).max(40).refine(unique, 'Question IDs must be unique'),
   qualifications: z.array(qualificationSchema).max(20).refine(unique, 'Qualification IDs must be unique'),
   stages: z.array(stageSchema).min(2).max(8).refine(unique, 'Stage IDs must be unique'),
+  faqs: z.array(faqSchema).max(8),
   championLimit: z.number().int().min(1).max(20), reviewMode: z.enum(['assigned','pool']), blindReview: z.boolean(),
 });
 export type CohortConfig = z.infer<typeof cohortSchema>;
 export interface Cohort extends CohortConfig { id: string; orgId: string; slug: string; version: number; createdAt: string; applicationCount?: number }
-export interface Organization { id: string; name: string; slug: string; plan: Plan; subscriptionStatus: 'trialing'|'active'|'past_due'|'canceled'; trialEndsAt: string; modules: Module[]; role: Role; stripeCustomerId?: string; createdAt: string }
+export interface Organization { id: string; name: string; slug: string; plan: Plan; subscriptionStatus: 'trialing'|'active'|'past_due'|'canceled'; trialEndsAt: string; modules: Module[]; role: Role; branding: Branding; stripeCustomerId?: string; createdAt: string }
 export interface User { id: string; email: string; name: string; platformAdmin: boolean }
 export interface Brief { source: 'local'|'openai'; summary: string; strengths: string[]; concerns: string[]; questions: string[]; evidence: { field: string; quote: string }[]; generatedAt: string; model: string; approvedAt: string|null; approvedBy: string|null }
 export interface Review { id: string; appId: string; reviewerId: string; reviewerName: string; stageId: string; scores: Record<string,number>; recommendation: Recommendation; champion: boolean; notes: string; overall: number; version: number; createdAt: string }
@@ -73,7 +79,7 @@ export const defaultStages: Stage[] = [
   { id: 'shortlist', label: 'Shortlist', minReviews: 1 }, { id: 'interviews', label: 'Interviews', minReviews: 1 },
   { id: 'selection', label: 'Final selection', minReviews: 0 },
 ];
-export function defaultCohort(): CohortConfig { return { name: '', description: 'A focused program for ambitious founders. Build alongside a community of operators, mentors and fellow entrepreneurs.', deadline: new Date(Date.now()+45*86400000).toISOString(), capacity: 20, status: 'draft', rubric: structuredClone(defaultRubric), questions: structuredClone(defaultQuestions), qualifications: [{ id: 'commitment', label: 'At least one founder can actively participate for the full program.', required: true }], stages: structuredClone(defaultStages), championLimit: 3, reviewMode: 'assigned', blindReview: false }; }
+export function defaultCohort(): CohortConfig { return { name: '', description: 'A focused program for ambitious founders. Build alongside a community of operators, mentors and fellow entrepreneurs.', deadline: new Date(Date.now()+45*86400000).toISOString(), capacity: 20, status: 'draft', rubric: structuredClone(defaultRubric), questions: structuredClone(defaultQuestions), qualifications: [{ id: 'commitment', label: 'At least one founder can actively participate for the full program.', required: true }], stages: structuredClone(defaultStages), faqs: [], championLimit: 3, reviewMode: 'assigned', blindReview: false }; }
 export function weightedScore(scores: Record<string,number>, rubric: Criterion[]): number { const total = rubric.reduce((s,c) => s+c.weight,0); return Math.round(rubric.reduce((s,c)=>s+(scores[c.id]||0)*c.weight,0)/total*100)/100; }
 export function currentReviews(app: Application) { return app.reviews.filter(r => r.stageId === app.stageId); }
 export function averageScore(reviews: Review[]) { return reviews.length ? reviews.reduce((s,r)=>s+r.overall,0)/reviews.length : 0; }

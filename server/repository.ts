@@ -3,7 +3,7 @@ import { plans } from '../shared/domain';
 import { assert } from './auth';
 import { Store, id, now } from './db';
 
-export interface OrgRow { id:string; name:string; slug:string; plan:Organization['plan']; subscription_status:Organization['subscriptionStatus']; trial_ends_at:string; modules:string; stripe_customer_id:string|null; stripe_subscription_id:string|null; created_at:string }
+export interface OrgRow { id:string; name:string; slug:string; plan:Organization['plan']; subscription_status:Organization['subscriptionStatus']; trial_ends_at:string; modules:string; branding:string; stripe_customer_id:string|null; stripe_subscription_id:string|null; created_at:string }
 export interface AppRow { id:string; org_id:string; cohort_id:string; data:string; status:Application['status']; stage_id:string; pool:Application['pool']; scrubbed_at:string|null; scrub_notes:string; brief:string|null; outcome:Application['outcome']; decision_notes:string; interview:string; version:number; created_at:string; submitted_at:string|null; token_hash:string }
 export interface ReviewRow { id:string; app_id:string; reviewer_id:string; reviewer_name:string; stage_id:string; scores:string; recommendation:Review['recommendation']; champion:number; notes:string; overall:number; version:number; created_at:string }
 export class Repository {
@@ -14,7 +14,7 @@ export class Repository {
     assert(row && membership,404,'Workspace not found');
     return this.orgDto(row,membership.role);
   }
-  orgDto(row: OrgRow,role: Role): Organization { return {id:row.id,name:row.name,slug:row.slug,plan:row.plan,subscriptionStatus:row.subscription_status,trialEndsAt:row.trial_ends_at,modules:JSON.parse(row.modules),role,createdAt:row.created_at}; }
+  orgDto(row: OrgRow,role: Role): Organization { return {id:row.id,name:row.name,slug:row.slug,plan:row.plan,subscriptionStatus:row.subscription_status,trialEndsAt:row.trial_ends_at,modules:JSON.parse(row.modules),role,branding:{accent:'#285d4e',footer:'Better decisions. Stronger cohorts.',senderName:'',logoUrl:'',...(row.branding?JSON.parse(row.branding):{})},createdAt:row.created_at}; }
   cohort(orgId: string,cohortId: string): Cohort { const row=this.store.get<{id:string;org_id:string;slug:string;config:string;version:number;created_at:string}>('SELECT * FROM cohorts WHERE org_id=? AND id=?',orgId,cohortId); assert(row,404,'Cohort not found'); return {...JSON.parse(row.config),id:row.id,orgId:row.org_id,slug:row.slug,version:row.version,createdAt:row.created_at}; }
   cohorts(orgId: string) { return this.store.all<{id:string}>('SELECT id FROM cohorts WHERE org_id=? ORDER BY created_at',orgId).map(r=>({...this.cohort(orgId,r.id),applicationCount:this.count('SELECT count(*) n FROM applications WHERE org_id=? AND cohort_id=? AND status=\'submitted\'',orgId,r.id)})); }
   app(orgId:string,appId:string) { const row=this.store.get<AppRow>('SELECT * FROM applications WHERE org_id=? AND id=?',orgId,appId); assert(row,404,'Application not found'); return this.appDto(row); }
